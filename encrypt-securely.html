@@ -1,0 +1,89 @@
+<html>
+<script type="text/javascript">
+let key
+// promise for an opened indexeddb database
+let db= new Promise(res => {
+	const storeOpen= indexedDB.open( "store", 1)
+
+	const keyArg= window.location.search
+
+	storeOpen.onupgradeneeded= e=> {
+		// make a key
+		if( !key){
+			// TODO: how and where can we store this key?
+			// https://www.w3.org/TR/WebCryptoAPI/#concepts-key-storage
+			key= await crypto.subtle.generateKey({
+					name: "AES-GCM",
+					length: 256 
+				},
+				true,
+				["encrypt, decrypt"]
+			)
+			history.pushState(null, "", window.location + `?key=${key.private}`
+		}
+
+
+		// make a store ("ObjectStore")
+		const db= event.target.result
+		db.createObjectStore( "objectStore", {
+			keyPath: "id",
+			autoIncrement: true
+		})
+	}
+	storeOpen.onsucess= e=> res( e.target.result)
+})
+async function saveSubmit(){
+	// encrypt data with key
+	const plainText= document.getElementById("text").value
+	const plainData= (new TextEncoder()).encode(plainText).buffer
+	const encryptedText= await crypto.subtle.encrypt({
+		name: "AES-GCM",
+		iv: crypto.getRandomValues(new Uint8Array( 12))
+	},
+		key,
+		plainData
+	)
+
+	// store encryptedText into db
+	const tx= (await db).transaction(["objectStore"], "write")
+	const success= new Promise( res=> tx.oncomplete= e=> res(e))
+	tx.objectStore("objectStore").add({ encryptedText})
+	await tx
+	console.log("data stored")
+}
+async function loadSubmit( e){
+	// read encryptedText from db
+	const tx= (await db).transaction(["objectStore"])
+	const cursorReq= new Promise( res=> tx.oncomplete= e=> res(e))
+	tx.objectStore("objectStore").openCursor()
+	const cursor= (await cursorReq).target.result
+	const encryptedBuffer= (new TextEncoder()).encode( cursor.value)
+
+	// use key to decrypt encryptedText to decryptedText
+	const decryptedBuffer= crypto.subtle.decrypt({
+		},
+		key,
+		encryptedBuffer
+	)
+	const decryptedText= (new TextEncoder()).decode( decryptedBuffer)
+
+	// put on screen
+	const el= document.getElementById("text")
+	el.value= decryptedText
+	console.log("data decrypted")
+}
+async function authnSubmit( e){
+	
+}
+</script>
+<form name="save" id="save" onsubmit="submit()">
+	<input type="text" id="text" name="text" value="save"></input>
+	<input type="submit" id="saveSubmit" name="saveSubmit" value="save"></input>
+</form>
+<form name="load" id="load" onsubmit="load()">
+	<input type="submit" id="loadSubmit" name="loadSubmit" value="load"></input>
+</form>
+<form name="authn" id="authn" onsubmit="authn()">
+	<input type="submit" id="authnSubmit" name="authnSubmit" value="webauthn"></input>
+</form>
+</html>
